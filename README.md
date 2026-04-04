@@ -1,16 +1,14 @@
-## Hi there 👋
+# Bottom Pot ATS Scraper
 
-<!--
-**richmondsogo/richmondsogo** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
+## About
+Bottom Pot is an automated ATS job scraper that bypasses traditional job aggregators and pulls fresh listings directly from ATS platforms.
 
-Here are some ideas to get you started:
+## Description
+Bottom Pot is a Python based job scraping pipeline built to search ATS platforms such as Ashby, Greenhouse, Lever, Workable, and BambooHR directly instead of relying on LinkedIn or Indeed.
 
-- 🔭 I’m currently working on ...
-- 🌱 I’m currently learning ...
-- 👯 I’m looking to collaborate on ...
-- 🤔 I’m looking for help with ...
-- 💬 Ask me about ...
-- 📫 How to reach me: ...
-- 😄 Pronouns: ...
-- ⚡ Fun fact: ...
--->
+It uses parameterized Google search queries with job title keywords, remote filters, and date thresholds to discover only relevant and recent openings. Playwright handles JavaScript rendered pages and bot detection friction, while Selenium supports automated navigation where needed.
+
+Scraped listings are normalized, deduplicated across platforms, and stored in PostgreSQL as a structured, queryable data product.
+
+## Tech Stack
+Python, Playwright, Selenium, PostgreSQL, Automation
