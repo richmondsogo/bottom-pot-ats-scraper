@@ -1,133 +1,233 @@
+import asyncio
+import json
+import sys
 import argparse
+from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
 from loguru import logger
-from src.project_files import SearchParams
-from src.project_files import ATS_PLATFORMS
+
+from src.project_files import ATS_PLATFORMS, SearchParams
+
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Bottom Pot - ATS job scraper")
+    parser = argparse.ArgumentParser(
+        description="Bottom Pot — scrape ATS platforms for job listings via Google Search.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    # Search strategy
     parser.add_argument(
         "--strategy",
-        default = "serper",
-        help = "Search strategy: 'serper' (API recommended) ",
+        default="serper",
+        choices=["serper"],
+        help="Search backend to use.",
     )
 
+    # Core search params
     parser.add_argument(
         "--job-title",
-        default="React Native Engineer",
-        help="Enter the job title you searched for",
+        required=True,
+        help="Job title to search for (e.g. 'React Native Engineer').",
     )
-
-    parser.add_argument(
-        "--no-remote", 
-        action="store_true", 
-        help="Add this filter to remove remote roles"
-    )
-
-    parser.add_argument(
-        "--days-back",
-        type=int,
-        default=7, 
-        help="Only show the listing from the past N days."
-    )
-
-    parser.add_argument(
-        "--output-dir",
-        default="outputs",
-        help="Base directory to write results (subdirs json/ and csv/)"
-    )
-
-    parser.add_argument(
-        "--outputs-prefix",
-        default="results",
-        help="Prefix for  the output filenames (defaults to 'results'). You can use this to differentiate between different runs or strategies (e.g. 'remote_intern_results' vs 'on_campus_results')",
-    )
-
     parser.add_argument(
         "--location",
-        default="United States",
-        help="Location to include in the search query (e.g., 'New York', 'London'). This adds location context to job searches and filters results by location mentioned in postings.",
+        default=None,
+        help="Location context added to the query (e.g. 'New York', 'London').",
     )
-
     parser.add_argument(
         "--country-code",
         default=None,
-        help="Country code for the search engine's geolocation (e.g., 'us' for google.com, 'gb' for google.co.uk). This restricts search results to a specific country's Google index. Omit for global search.",
+        help=(
+            "Restrict results to a country's Google index "
+            "(e.g. 'us' for google.com, 'gb' for google.co.uk). "
+            "Omit for a global search."
+        ),
+    )
+    parser.add_argument(
+        "--days-back",
+        type=int,
+        default=7,
+        help="Only return listings posted within the last N days.",
+    )
+    remote_group = parser.add_mutually_exclusive_group()
+    remote_group.add_argument(
+        "--remote",
+        action="store_true",
+        default=False,
+        help="Only return remote roles (adds '\"remote\"' to the query).",
+    )
+    remote_group.add_argument(
+        "--no-remote",
+        action="store_true",
+        default=False,
+        help="Exclude remote roles (adds '-\"remote\"' to the query).",
     )
 
+    # Filters
     parser.add_argument(
         "--salary-min",
         type=int,
-        help="Minimum salary filter (if available)",
+        default=None,
+        help="Minimum salary hint included in the query (e.g. 80000).",
     )
-
     parser.add_argument(
         "--experience-level",
         choices=["entry", "mid", "senior", "lead"],
-        help="Filter by experience level",
+        default=None,
+        help="Filter by experience level.",
     )
-
     parser.add_argument(
         "--exclude-keywords",
         default="",
-        help="Comma-separated keywords to exclude from results",
+        help="Comma-separated keywords to exclude (e.g. 'intern,contract,part-time').",
     )
-
     parser.add_argument(
         "--max-results",
         type=int,
         default=100,
-        help="Maximum number of job listings to retrieve",
+        help="Cap on total results returned across all platforms.",
     )
 
+    # Platform selection
+    parser.add_argument(
+        "--platforms",
+        default=None,
+        help=(
+            "Comma-separated ATS platform names to search "
+            "(e.g. 'greenhouse,lever'). Omit to search all platforms. "
+            f"Available: {', '.join(p.name for p in ATS_PLATFORMS)}"
+        ),
+    )
+
+    # Output
+    parser.add_argument(
+        "--output-dir",
+        default="outputs",
+        help="Base directory for results (json/ and csv/ sub-dirs are created automatically).",
+    )
+    parser.add_argument(
+        "--output-prefix",
+        default="results",
+        help="Filename prefix for output files (e.g. 'remote_senior_results').",
+    )
+
+    # Logging
     parser.add_argument(
         "--verbose",
         action="store_true",
-        help="Enable verbose logging output",
+        help="Enable DEBUG-level logging.",
     )
 
     return parser.parse_args()
 
-async def main():
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+async def main() -> None:
     args = parse_args()
 
+    # Configure log level before anything else logs.
+    logger.remove()
+    logger.add(
+        sys.stderr,
+        level="DEBUG" if args.verbose else "INFO",
+        colorize=True,
+        format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | {message}",
+    )
+
+    # Build SearchParams from CLI args.
     params = SearchParams(
         job_title=args.job_title,
         location=args.location,
+        country_code=args.country_code,
+        days_back=args.days_back,
+        remote=True if args.remote else (False if args.no_remote else None),
         salary_min=args.salary_min,
         experience_level=args.experience_level,
-        exclude_keywords=[kw.strip() for kw in args.exclude_keywords.split(",") if kw.strip()],
+        exclude_keywords=[
+            kw.strip() for kw in args.exclude_keywords.split(",") if kw.strip()
+        ],
         max_results=args.max_results,
-        remote = not args.no_remote,
-        days_back=args.days_back,
-        country_code=args.country_code,
     )
 
+    # Resolve platforms.
     platforms = None
-
     if args.platforms:
-        platforms = [p for p in ATS_PLATFORMS if p.name == args.platforms]
+        requested = {name.strip().lower() for name in args.platforms.split(",")}
+        platforms = [p for p in ATS_PLATFORMS if p.name in requested]
         if not platforms:
-            logger.error(f"No valid platforms found for --platforms={args.platforms}. Available options: {[p.name for p in ATS_PLATFORMS]}")
+            logger.error(
+                f"No matching platforms for: {args.platforms}. "
+                f"Available names: {[p.name for p in ATS_PLATFORMS]}"
+            )
             return
 
     logger.info(
-        f"Bottom Pot - ATS Job Scraper | Strategy: {args.strategy} | Job Title: {params.job_title} | "
-        f"Location: {params.location} | Country Code: {params.country_code} | Salary Min: {params.salary_min} | "
-        f"Experience Level: {params.experience_level} | Exclude Keywords: {params.exclude_keywords} | "
-        f"Max Results: {params.max_results} | Remote: {params.remote} | Days Back: {params.days_back} | "
+        f"Bottom Pot | strategy={args.strategy} | job_title={params.job_title!r} | "
+        f"location={params.location!r} | country_code={params.country_code} | "
+        f"days_back={params.days_back} | remote={params.remote} | "
+        f"salary_min={params.salary_min} | experience_level={params.experience_level} | "
+        f"exclude_keywords={params.exclude_keywords} | max_results={params.max_results} | "
+        f"platforms={[p.name for p in platforms] if platforms else 'all'}"
     )
-    
-    if args.verbose:
-        logger.info(f"Using platforms: {[p.label for p in platforms] if platforms else 'All'}")
-        
-    # Here you would call your scraping functions, passing in `params` and `platforms` as needed
-    if args.strategy == "serper":
-        logger.info("Starting scraping using Serper API...")
-        # await scrape_with_serper(params, platforms)
-        
-        
 
-    
-    
-    if args.verbose:
-        logger.info("Scraping completed. Check the output directory for results.")
+    # Run search.
+    results = []
+    if args.strategy == "serper":
+        from src.project_files.serper_searcher import SerperSearcher
+
+        results = await SerperSearcher().run(params, platforms)
+
+    # Print a summary to stdout.
+    print(f"\n{'─' * 60}")
+    print(f"  Found {len(results)} result(s)")
+    print(f"{'─' * 60}\n")
+    for r in results:
+        print(f"[{r.ats_source.upper()}] {r.title}")
+        if r.snippet:
+            print(f"  {r.snippet}")
+        print(f"  {r.url}")
+        print(f"  Query: {r.query_used}\n")
+
+    # Save outputs.
+    output_dir = Path(args.output_dir)
+    json_dir = output_dir / "json"
+    csv_dir = output_dir / "csv"
+    json_dir.mkdir(parents=True, exist_ok=True)
+    csv_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    json_path = json_dir / f"{args.output_prefix}_results.json"
+    csv_path = csv_dir / f"{args.output_prefix}_results.csv"
+
+    json_path.write_text(
+        json.dumps(
+            [r.model_dump(mode="json") for r in results], ensure_ascii=False, indent=4
+        ),
+        encoding="utf-8",
+    )
+
+    if results:
+        pd.DataFrame([r.model_dump(mode="json") for r in results]).to_csv(
+            csv_path, index=False, encoding="utf-8-sig"
+        )
+
+    print(f"{'─' * 60}")
+    print(f"  Saved {len(results)} result(s) at {timestamp}")
+    print(f"  JSON → {json_path}")
+    print(f"  CSV  → {csv_path}")
+    print(f"{'─' * 60}\n")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlencode
 
@@ -52,7 +52,9 @@ class QueryBuilder:
             parts.append(f'"{experience_text}"')
 
         if params.days_back is not None and params.days_back > 0:
-            cutoff_date = (datetime.utcnow() - timedelta(days=params.days_back)).date()
+            cutoff_date = (
+                datetime.now(timezone.utc) - timedelta(days=params.days_back)
+            ).date()
             parts.append(f"after:{cutoff_date.isoformat()}")
 
         for keyword in params.exclude_keywords or []:
@@ -100,4 +102,3 @@ class QueryBuilder:
         if params.country_code:
             url_params["gl"] = self.normalize_country_code(params.country_code)
         return f"{GOOGLE_BASE_URL}?{urlencode(url_params)}"
-

@@ -2,16 +2,26 @@ import os
 from dotenv import load_dotenv
 from src.project_files.models import ATSConfig
 
+load_dotenv()
 
-ATS_PLATFORMS = [ATSConfig(name="greenhouse", site_operator="greenhouse.io", label="Greenhouse"),
-    ATSConfig(name="greenhouse", site_operator="boards.greenhouse.io", label="Greenhouse"),
+ATS_PLATFORMS = [
+    ATSConfig(name="greenhouse", site_operator="greenhouse.io", label="Greenhouse"),
+    ATSConfig(
+        name="greenhouse_boards",
+        site_operator="boards.greenhouse.io",
+        label="Greenhouse Boards",
+    ),
     ATSConfig(name="lever", site_operator="jobs.lever.co", label="Lever"),
     ATSConfig(name="ashby", site_operator="jobs.ashby.com", label="Ashby"),
     ATSConfig(name="workable", site_operator="apply.workable.com", label="Workable"),
     ATSConfig(name="bamboohr", site_operator="bamboohr.com/careers", label="BambooHR"),
     ATSConfig(name="jobvite", site_operator="jobs.jobvite.com", label="Jobvite"),
     ATSConfig(name="notion", site_operator="notion.site", label="Notion"),
-    ATSConfig(name="smartrecruiters", site_operator="jobs.smartrecruiters.com", label="SmartRecruiters"),
+    ATSConfig(
+        name="smartrecruiters",
+        site_operator="jobs.smartrecruiters.com",
+        label="SmartRecruiters",
+    ),
     ATSConfig(name="icims", site_operator="icims.com", label="iCIMS"),
     ATSConfig(name="personio", site_operator="jobs.personio.com", label="Personio"),
     ATSConfig(name="teamtailor", site_operator="teamtailor.com", label="Teamtailor"),
@@ -22,12 +32,11 @@ ATS_PLATFORMS = [ATSConfig(name="greenhouse", site_operator="greenhouse.io", lab
     ATSConfig(name="jobadder", site_operator="jobadder.com", label="JobAdder"),
     ATSConfig(name="jazzhr", site_operator="applytojob.com", label="JazzHR"),
     ATSConfig(name="avature", site_operator="avature.net", label="Avature"),
-    ATSConfig(name="successfactors", site_operator="jobs.sap.com", label="SAP SuccessFactors"),
+    ATSConfig(
+        name="successfactors", site_operator="jobs.sap.com", label="SAP SuccessFactors"
+    ),
 ]
 
-load_dotenv()
-load_dotenv("../../env.SERPER_API_KEY")
-
-SERPER_API_KEY = os.environ.get("SERPER_API_KEY")  
-SERPER_ENDPOINT = "https://google.serper.dev/search"
-SERPER_MAX_PAGES= 3
+SERPER_API_KEY: str | None = os.environ.get("SERPER_API_KEY")
+SERPER_ENDPOINT: str = "https://google.serper.dev/search"
+SERPER_MAX_PAGES: int = 3

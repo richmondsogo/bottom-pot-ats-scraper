@@ -1,7 +1,13 @@
 import httpx
 from typing import Optional
 from loguru import logger
-from src.project_files.config import SERPER_ENDPOINT, SERPER_API_KEY, SERPER_MAX_PAGES
+
+from src.project_files.config import (
+    ATS_PLATFORMS,
+    SERPER_API_KEY,
+    SERPER_ENDPOINT,
+    SERPER_MAX_PAGES,
+)
 from src.project_files.models import ATSConfig, RawSearchResults, SearchParams
 from src.project_files.query_builder import QueryBuilder
 
@@ -11,70 +17,66 @@ class SerperSearcher:
     Queries Google Search via Serper.dev's JSON API.
 
     Each paginated request costs 1 Serper credit.
-
-    Budget per full run (all platforms, 3 pages each):
-        7 platforms × 3 pages = 21 credits
-
-    With 2,500 free credits that's ~119 full runs before you need to pay.
+    Budget per full run across all platforms at 3 pages each: ~60 credits.
+    With 2,500 free credits that's ~41 full runs before you need to pay.
 
     Usage:
         searcher = SerperSearcher()
         results = await searcher.run(SearchParams(job_title="Data Engineer"))
     """
+
     def __init__(self):
         if not SERPER_API_KEY:
-            raise RuntimeError(f"Serper API key not found. Please set the {SERPER_API_KEY} environment variable.in a .env file in the main")
-
+            raise RuntimeError(
+                "Serper API key not found. Please set SERPER_API_KEY in your .env file."
+            )
         self.headers = {
             "X-API-KEY": SERPER_API_KEY,
             "Content-Type": "application/json",
         }
 
     async def _search_page(
-        self, 
+        self,
         client: httpx.AsyncClient,
-        query: str, 
+        query: str,
         page: int,
-        country_code: Optional[str] = "us",
-        days_back: Optional[int] = None,
+        country_code: Optional[str],
+        days_back: Optional[int],
     ) -> dict:
         """
-        Makes a single Serper API request.
+        Makes a single paginated Serper API request (1 credit per call).
 
-        Serper paginates with `page` (1-indexed) and returns up to 10 results.
-        The `num` field can go up to 100 but costs proportionally more credits.
-        We keep it at 10 per page and paginate manually for transparency.
+        `page` is 1-indexed. We fix `num` at 10 so credit cost stays predictable;
+        raise it (up to 100) if you want more results per credit at the cost of
+        less granular pagination logging.
         """
-        if days_back is not None and days_back > 0:
-            tbs_value = f"qdr:d{days_back}"
-        else:
-            tbs_value = f"qdr:d{7}"
-
-        payload = {
+        payload: dict = {
             "q": query,
-            "page": page,  # 1-indexed page number for pagination
-            "num": 10,  # results per page (max 100, costs more credits)
-            "hl": "en",  # language of the search results (English)
-            "tbs": tbs_value,
+            "page": page,
+            "num": 10,
+            "hl": "en",
+            "tbs": f"qdr:d{days_back}" if days_back and days_back > 0 else "qdr:d7",
         }
 
         if country_code:
-            payload["gl"] = country_code  # geolocation (country code, e.g., "us", "gb"); omit for global search
+            payload["gl"] = country_code
 
         try:
             response = await client.post(
                 SERPER_ENDPOINT,
-                json=payload, 
+                json=payload,
                 headers=self.headers,
-                timeout=30.0,  # seconds
+                timeout=30.0,
             )
             response.raise_for_status()
             return response.json()
 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 403:
-                raise RuntimeError("Serper API key invalid or quota exhausted.")
-            logger.error(f"Serper HTTP error: {e.response.status_code}")
+                raise RuntimeError("Serper API key is invalid or quota is exhausted.")
+            logger.error(
+                f"Serper HTTP {e.response.status_code} on page {page} for query: {query}"
+            )
             return {}
 
     def _parse_response(
@@ -84,40 +86,38 @@ class SerperSearcher:
         query_str: str,
     ) -> list[RawSearchResults]:
         """
-        Parses Serper API response and extracts relevant fields.
+        Extracts and validates organic results from a Serper response.
 
-        We also log the original query used to generate each result for traceability.
-        
-        Serper returns organic results under data["organic"], each with:
-            - link  (the URL)
+        Serper returns results under data["organic"], each with:
+            - link     (the URL)
             - title
             - snippet
-            - date  (relative, e.g. "19 hours ago") — useful for dedup later
+            - date     (relative, e.g. "3 hours ago") — useful for dedup later
         """
         results: list[RawSearchResults] = []
 
         for item in data.get("organic", []):
-            url = item.get("link")
-            if not url or not url.startswith("https"):
+            url = item.get("link", "")
+            title = item.get("title", "")
+
+            if not url.startswith("https") or not title:
                 continue
 
-            # Confirm the result is actually from the ATS we queried
-            # Serper is reliable here, but belt-and-braces doesn't hurt
+            # Belt-and-braces: confirm the result belongs to the ATS we queried.
             if ats.site_operator not in url:
-                logger.debug(f"Filtered out off-domain result: {url}")
+                logger.debug(f"Skipping off-domain result: {url}")
                 continue
 
-            title = item.get("title")
-            snippet = item.get("snippet", "").strip() or None
-
-            if url and title:
-                results.append(RawSearchResults(
+            results.append(
+                RawSearchResults(
                     url=url,
                     title=title,
-                    snippet=snippet,
+                    snippet=item.get("snippet", "").strip() or None,
                     ats_source=ats.name,
                     query_used=query_str,
-                ))
+                )
+            )
+
         return results
 
     async def search_ats_platform(
@@ -126,38 +126,66 @@ class SerperSearcher:
         ats: ATSConfig,
         params: SearchParams,
         query_str: str,
-        country_code: Optional[str] = "us",
-        days_back: Optional[int] = None,
     ) -> list[RawSearchResults]:
         """
-        Searches a single ATS platform across multiple pages and aggregates results.
+        Searches one ATS platform across all configured pages.
 
-        We paginate up to SERPER_MAX_PAGES to get more results, but this can be adjusted.
+        Always runs the full SERPER_MAX_PAGES — Google may surface different
+        listings on later pages regardless of how many came back on earlier ones,
+        so we never stop early.
         """
-        builder = QueryBuilder(ats)
-        payload = builder.build_serper_payload(params, page=page)
-        data = await client.post(SERPER_ENDPOINT, json=payload, headers=self.headers)
-                        
         all_results: list[RawSearchResults] = []
 
         for page in range(1, SERPER_MAX_PAGES + 1):
-            logger.debug(f"Searching {ats.label} (page {page}) with query: {query_str}")
-            logger.debug(f"Serper search payload: {{'q': {query_str}, 'page': {page}, 'num': 10, 'hl': 'en', 'tbs': 'qdr:d{days_back}', 'gl': {country_code}}}")
-            
-            logger.info(f"Searching {ats.label} (page {page}) with query: {query_str}")
+            logger.debug(f"[{ats.label}] Fetching page {page} | query: {query_str}")
 
+            data = await self._search_page(
+                client,
+                query_str,
+                page,
+                country_code=params.country_code,
+                days_back=params.days_back,
+            )
 
-            
-            data = await self._search_page(client, query_str, page, country_code, days_back)
             page_results = self._parse_response(data, ats, query_str)
             all_results.extend(page_results)
-
-            # If we get fewer than 10 results, it's likely the last page
-            if len(page_results) < 10:
-                break
+            logger.info(
+                f"[{ats.label}] Page {page}/{SERPER_MAX_PAGES} → {len(page_results)} results"
+            )
 
         return all_results
 
-    # await self._search_page(
-    #     client, query, page, country_code=params.country_code, days_back=params.days_back
-    # )
+    async def run(
+        self,
+        params: SearchParams,
+        platforms: Optional[list[ATSConfig]] = None,
+    ) -> list[RawSearchResults]:
+        """
+        Runs the full search across all (or selected) ATS platforms.
+
+        Results are capped at params.max_results after all platforms are searched
+        so the caller gets a predictable upper bound.
+        """
+        all_results: list[RawSearchResults] = []
+        target_platforms = platforms or ATS_PLATFORMS
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for ats in target_platforms:
+                query_str = QueryBuilder(ats).build_query_string(params)
+                logger.info(f"[{ats.label}] Starting search | query: {query_str}")
+
+                platform_results = await self.search_ats_platform(
+                    client, ats, params, query_str
+                )
+                all_results.extend(platform_results)
+
+                logger.success(
+                    f"[{ats.label}] Done — {len(platform_results)} results "
+                    f"(running total: {len(all_results)})"
+                )
+
+        if params.max_results:
+            all_results = all_results[: params.max_results]
+            logger.info(f"Results capped at max_results={params.max_results}")
+
+        return all_results
