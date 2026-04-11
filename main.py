@@ -10,6 +10,8 @@ from loguru import logger
 
 from src.project_files import ATS_PLATFORMS, SearchParams
 
+# I imported all the necessary modules. asyncio for async, json for output, argparse for CLI,
+# pandas for CSV export, loguru for logging, and my own modules.
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -17,12 +19,16 @@ from src.project_files import ATS_PLATFORMS, SearchParams
 
 
 def parse_args() -> argparse.Namespace:
+    """
+    I parse the command-line arguments. I use argparse to handle all the options
+    the user can pass. This makes the script flexible.
+    """
     parser = argparse.ArgumentParser(
         description="Bottom Pot — scrape ATS platforms for job listings via Google Search.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
 
-    # Search strategy
+    # I added the search strategy argument, but currently only serper is supported.
     parser.add_argument(
         "--strategy",
         default="serper",
@@ -30,7 +36,7 @@ def parse_args() -> argparse.Namespace:
         help="Search backend to use.",
     )
 
-    # Core search params
+    # I added all the core search params that the user can specify.
     parser.add_argument(
         "--job-title",
         required=True,
@@ -56,6 +62,7 @@ def parse_args() -> argparse.Namespace:
         default=7,
         help="Only return listings posted within the last N days.",
     )
+    # I used mutually exclusive group for remote options.
     remote_group = parser.add_mutually_exclusive_group()
     remote_group.add_argument(
         "--remote",
@@ -70,7 +77,7 @@ def parse_args() -> argparse.Namespace:
         help="Exclude remote roles (adds '-\"remote\"' to the query).",
     )
 
-    # Filters
+    # I added filters like salary, experience, etc.
     parser.add_argument(
         "--salary-min",
         type=int,
@@ -95,7 +102,7 @@ def parse_args() -> argparse.Namespace:
         help="Cap on total results returned across all platforms.",
     )
 
-    # Platform selection
+    # I allowed selecting specific platforms.
     parser.add_argument(
         "--platforms",
         default=None,
@@ -106,7 +113,7 @@ def parse_args() -> argparse.Namespace:
         ),
     )
 
-    # Output
+    # I added output options.
     parser.add_argument(
         "--output-dir",
         default="outputs",
@@ -118,7 +125,7 @@ def parse_args() -> argparse.Namespace:
         help="Filename prefix for output files (e.g. 'remote_senior_results').",
     )
 
-    # Logging
+    # I added logging option.
     parser.add_argument(
         "--verbose",
         action="store_true",
@@ -134,9 +141,13 @@ def parse_args() -> argparse.Namespace:
 
 
 async def main() -> None:
+    """
+    I am the main entry point. I parse args, set up logging, build params, run the search,
+    print results, and save outputs. This is where everything comes together.
+    """
     args = parse_args()
 
-    # Configure log level before anything else logs.
+    # I configured the logger before anything else logs, so I can control the output level.
     logger.remove()
     logger.add(
         sys.stderr,
@@ -145,7 +156,7 @@ async def main() -> None:
         format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | {message}",
     )
 
-    # Build SearchParams from CLI args.
+    # I built SearchParams from the CLI args. I mappped the remote flags to the enum.
     params = SearchParams(
         job_title=args.job_title,
         location=args.location,
@@ -160,7 +171,7 @@ async def main() -> None:
         max_results=args.max_results,
     )
 
-    # Resolve platforms.
+    # I resolved the platforms. If user specified, I filterd to those.
     platforms = None
     if args.platforms:
         requested = {name.strip().lower() for name in args.platforms.split(",")}
@@ -172,6 +183,7 @@ async def main() -> None:
             )
             return
 
+    # I logged all the params for debugging.
     logger.info(
         f"Bottom Pot | strategy={args.strategy} | job_title={params.job_title!r} | "
         f"location={params.location!r} | country_code={params.country_code} | "
@@ -181,14 +193,14 @@ async def main() -> None:
         f"platforms={[p.name for p in platforms] if platforms else 'all'}"
     )
 
-    # Run search.
+    # I ran the search based on strategy. Currently only serper.
     results = []
     if args.strategy == "serper":
         from src.project_files.serper_searcher import SerperSearcher
 
         results = await SerperSearcher().run(params, platforms)
 
-    # Print a summary to stdout.
+    # I printed a summary to stdout with a nice border.
     print(f"\n{'─' * 60}")
     print(f"  Found {len(results)} result(s)")
     print(f"{'─' * 60}\n")
@@ -199,7 +211,7 @@ async def main() -> None:
         print(f"  {r.url}")
         print(f"  Query: {r.query_used}\n")
 
-    # Save outputs.
+    # I saved the outputs to JSON and CSV.
     output_dir = Path(args.output_dir)
     json_dir = output_dir / "json"
     csv_dir = output_dir / "csv"
@@ -210,6 +222,7 @@ async def main() -> None:
     json_path = json_dir / f"{args.output_prefix}_results.json"
     csv_path = csv_dir / f"{args.output_prefix}_results.csv"
 
+    # I wrote the JSON file with pretty printing.
     json_path.write_text(
         json.dumps(
             [r.model_dump(mode="json") for r in results], ensure_ascii=False, indent=4
@@ -217,11 +230,13 @@ async def main() -> None:
         encoding="utf-8",
     )
 
+    # I created the CSV if there are results.
     if results:
         pd.DataFrame([r.model_dump(mode="json") for r in results]).to_csv(
             csv_path, index=False, encoding="utf-8-sig"
         )
 
+    # I printed the final summary.
     print(f"{'─' * 60}")
     print(f"  Saved {len(results)} result(s) at {timestamp}")
     print(f"  JSON → {json_path}")
@@ -230,4 +245,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
+    # I ran the main function with asyncio.
     asyncio.run(main())
