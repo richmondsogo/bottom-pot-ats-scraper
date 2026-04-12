@@ -12,3 +12,4 @@ Scraped listings are normalized, deduplicated across platforms, and stored in JS
 
 ## Tech Stack
 Python, httpx, Serper API, pandas
+ 
