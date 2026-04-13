@@ -43,8 +43,8 @@ class SerperSearcher:
     ) -> dict:
         """
         I made a single paginated Serper API request. Page is 1-indexed.
-        I fixed num at 10 to keep credit costs predictable; you can raise it to 100 for more results per credit,
-        but that might give less granular pagination.
+        I fixed num at 10 for more results per credit. I also added hl=en for English results and tbs for date filtering.
+        I handle HTTP errors and log them. If the key is invalid or quota is exhausted, It'll raise a RuntimeError.
         """
         # I built the payload with query, page, num, etc.
         payload: dict = {
@@ -100,11 +100,6 @@ class SerperSearcher:
 
             # I skipped if no https or no title.
             if not url.startswith("https") or not title:
-                continue
-
-            # I checked if it belongs to the ATS site.
-            if ats.site_operator not in url:
-                logger.debug(f"Skipping off-domain result: {url}")
                 continue
 
             # I created a RawSearchResults object.

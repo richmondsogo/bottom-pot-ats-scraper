@@ -113,7 +113,7 @@ class QueryBuilder:
     @staticmethod
     def normalize_country_code(country_code: Optional[str]) -> Optional[str]:
         """
-        I normalize the country code to lowercase and stripped.
+        I normalized the country code to lowercase and stripped.
         You can pass "US" or "us", I make it "us".
         """
         if not country_code:
