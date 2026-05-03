@@ -48,4 +48,4 @@ SERPER_API_KEY: str | None = os.environ.get("SERPER_API_KEY")
 # This is the endpoint I use for Serper API calls. It's fixed.
 SERPER_ENDPOINT: str = "https://google.serper.dev/search"
 # I limited the number of pages per platform to 3 to control costs. Each page costs 1 credit.
-SERPER_MAX_PAGES: int = 5
+SERPER_MAX_PAGES: int = 3

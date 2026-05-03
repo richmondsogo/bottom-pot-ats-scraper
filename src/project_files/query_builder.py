@@ -39,9 +39,10 @@ class QueryBuilder:
         # I always include the site operator to limit to this ATS platform.
         parts: list[str] = [f"site:{self.ats.site_operator}"]
 
-        # I cleaned the job title and quote it if it has spaces.
+        # I cleaned the job title. For site-limited Serper queries, quoting the job title
+        # can make the search too strict and return zero results, so I leave it unquoted.
         title = params.job_title.strip()
-        parts.append(f'"{title}"' if " " in title else title)
+        parts.append(title)
 
         # If location is provided, I add it, quoting if needed.
         if params.location:

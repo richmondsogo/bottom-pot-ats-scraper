@@ -41,4 +41,4 @@ class RawSearchResults(BaseModel):
     snippet: Optional[str]  # A preview text from Google
     ats_source: str  # Which platform, like "greenhouse"
     query_used: str  # The exact Google query I used
-    scraped_at: datetime = datetime.now(timezone.utc)  # Timestamp when I got this result
+    scraped_at: datetime = datetime.now(timezone.utc)  # Timestamp when I got this result 
